@@ -256,25 +256,55 @@ script:
                 data:
                   trigger: schedule
  
-            - switch.turn_on: relay_ch1
-            - delay: !lambda "return (uint32_t)(id(duration_z1) * 60000);"
-            - switch.turn_off: relay_ch1
- 
-            - switch.turn_on: relay_ch2
-            - delay: !lambda "return (uint32_t)(id(duration_z2) * 60000);"
-            - switch.turn_off: relay_ch2
- 
-            - switch.turn_on: relay_ch3
-            - delay: !lambda "return (uint32_t)(id(duration_z3) * 60000);"
-            - switch.turn_off: relay_ch3
- 
-            - switch.turn_on: relay_ch4
-            - delay: !lambda "return (uint32_t)(id(duration_z4) * 60000);"
-            - switch.turn_off: relay_ch4
- 
-            - switch.turn_on: relay_ch5
-            - delay: !lambda "return (uint32_t)(id(duration_z5) * 60000);"
-            - switch.turn_off: relay_ch5
+            - if:
+                condition:
+                  lambda: "return id(duration_z1) > 0;"
+                then:
+                  - switch.turn_on: relay_ch1
+                  - delay: !lambda "return (uint32_t)(id(duration_z1) * 60000);"
+                  - switch.turn_off: relay_ch1
+                else:
+                  - logger.log: "Zone 1 skipped (duration 0)"
+
+            - if:
+                condition:
+                  lambda: "return id(duration_z2) > 0;"
+                then:
+                  - switch.turn_on: relay_ch2
+                  - delay: !lambda "return (uint32_t)(id(duration_z2) * 60000);"
+                  - switch.turn_off: relay_ch2
+                else:
+                  - logger.log: "Zone 2 skipped (duration 0)"
+
+            - if:
+                condition:
+                  lambda: "return id(duration_z3) > 0;"
+                then:
+                  - switch.turn_on: relay_ch3
+                  - delay: !lambda "return (uint32_t)(id(duration_z3) * 60000);"
+                  - switch.turn_off: relay_ch3
+                else:
+                  - logger.log: "Zone 3 skipped (duration 0)"
+
+            - if:
+                condition:
+                  lambda: "return id(duration_z4) > 0;"
+                then:
+                  - switch.turn_on: relay_ch4
+                  - delay: !lambda "return (uint32_t)(id(duration_z4) * 60000);"
+                  - switch.turn_off: relay_ch4
+                else:
+                  - logger.log: "Zone 4 skipped (duration 0)"
+
+            - if:
+                condition:
+                  lambda: "return id(duration_z5) > 0;"
+                then:
+                  - switch.turn_on: relay_ch5
+                  - delay: !lambda "return (uint32_t)(id(duration_z5) * 60000);"
+                  - switch.turn_off: relay_ch5
+                else:
+                  - logger.log: "Zone 5 skipped (duration 0)"
  
             - globals.set:
                 id: schedule_running
@@ -530,7 +560,7 @@ number:
   - platform: template
     name: "Zone 1 Duration (min)"
     icon: mdi:timer
-    min_value: 1
+    min_value: 0
     max_value: 60
     step: 1
     unit_of_measurement: min
@@ -544,7 +574,7 @@ number:
   - platform: template
     name: "Zone 2 Duration (min)"
     icon: mdi:timer
-    min_value: 1
+    min_value: 0
     max_value: 60
     step: 1
     unit_of_measurement: min
@@ -558,7 +588,7 @@ number:
   - platform: template
     name: "Zone 3 Duration (min)"
     icon: mdi:timer
-    min_value: 1
+    min_value: 0
     max_value: 60
     step: 1
     unit_of_measurement: min
@@ -572,7 +602,7 @@ number:
   - platform: template
     name: "Zone 4 Duration (min)"
     icon: mdi:timer
-    min_value: 1
+    min_value: 0
     max_value: 60
     step: 1
     unit_of_measurement: min
@@ -586,7 +616,7 @@ number:
   - platform: template
     name: "Zone 5 Duration (min)"
     icon: mdi:timer
-    min_value: 1
+    min_value: 0
     max_value: 60
     step: 1
     unit_of_measurement: min
