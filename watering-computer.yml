@@ -1,0 +1,704 @@
+esphome:
+  name: "watering-computer"
+  friendly_name: Watering-Computer
+  min_version: 2025.11.0
+  name_add_mac_suffix: false
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: restore_schedule_state
+  on_loop:
+    then:
+      - lambda: |-
+          if (id(schedule_poll).is_running()) return;
+          if (!id(local_time).now().is_valid()) return;
+          auto t = id(local_time).now();
+          int secs_to_next = (5 - (t.minute % 5)) * 60 - t.second + 10;
+          if (secs_to_next > 300) secs_to_next -= 300;
+          ESP_LOGI("watering", "SNTP valid at %02d:%02d – poll starts in %ds",
+            t.hour, t.minute, secs_to_next);
+          id(align_delay_secs) = secs_to_next;
+          id(schedule_poll).execute();
+
+esp32:
+  variant: esp32
+  framework:
+    type: esp-idf
+    advanced:
+      minimum_chip_revision: "3.1"
+
+logger:
+
+api:
+  services:
+    - service: set_weather_ok
+      variables:
+        weather_clear: bool
+      then:
+        - globals.set:
+            id: weather_ok
+            value: !lambda "return weather_clear;"
+        - logger.log:
+            format: "HA pushed weather_ok = %d"
+            args: ["weather_clear"]
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Watering-Computer Fallback"
+    password: !secret wifi_password
+
+captive_portal:
+ 
+# ─────────────────────────────────────────────────────────────────
+# TIME – HA is primary (fast, reliable on esp-idf), SNTP is fallback
+# ─────────────────────────────────────────────────────────────────
+time:
+  - platform: homeassistant
+    id: local_time
+    timezone: Europe/Budapest
+  - platform: sntp
+    timezone: Europe/Budapest
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+ 
+# ─────────────────────────────────────────────────────────────────
+# GLOBALS – single block
+# Persistent settings use restore_value: yes (saved to flash)
+# Runtime-only flags use restore_value: no
+# ─────────────────────────────────────────────────────────────────
+globals:
+  # ── Persistent – survive reboot and power loss
+  - id: schedule_hour
+    type: int
+    restore_value: yes
+    initial_value: "6"
+ 
+  - id: schedule_minute
+    type: int
+    restore_value: yes
+    initial_value: "0"
+ 
+  - id: weather_ok
+    type: bool
+    restore_value: yes
+    initial_value: "true"
+ 
+  - id: master_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "true"
+ 
+  - id: manual_skip
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+ 
+  - id: duration_z1
+    type: int
+    restore_value: yes
+    initial_value: "10"
+ 
+  - id: duration_z2
+    type: int
+    restore_value: yes
+    initial_value: "10"
+ 
+  - id: duration_z3
+    type: int
+    restore_value: yes
+    initial_value: "10"
+ 
+  - id: duration_z4
+    type: int
+    restore_value: yes
+    initial_value: "10"
+ 
+  - id: duration_z5
+    type: int
+    restore_value: yes
+    initial_value: "10"
+ 
+  - id: moisture_skip_threshold
+    type: float
+    restore_value: yes
+    initial_value: "40.0"
+ 
+  - id: moisture_topup_threshold
+    type: float
+    restore_value: yes
+    initial_value: "20.0"
+ 
+  - id: last_watered_epoch
+    type: int
+    restore_value: yes
+    initial_value: "0"
+ 
+  # ── Runtime only – always reset on boot
+  - id: active_channels
+    type: int
+    restore_value: no
+    initial_value: "0"
+ 
+  - id: schedule_running
+    type: bool
+    restore_value: no
+    initial_value: "false"
+ 
+  - id: skip_result
+    type: bool
+    restore_value: no
+    initial_value: "false"
+ 
+  - id: last_run_day
+    type: int
+    restore_value: no
+    initial_value: "-1"
+ 
+  - id: align_delay_secs
+    type: int
+    restore_value: no
+    initial_value: "0"
+ 
+# ─────────────────────────────────────────────────────────────────
+# SCRIPTS
+# ─────────────────────────────────────────────────────────────────
+script:
+  # ── Aligned 5-minute poll – started by on_loop once SNTP valid, repeats forever
+  - id: schedule_poll
+    mode: single
+    then:
+      - delay: !lambda "return (uint32_t)(id(align_delay_secs) * 1000);"
+      - while:
+          condition:
+            lambda: "return true;"
+          then:
+            - lambda: |-
+                auto t = id(local_time).now();
+                ESP_LOGI("watering", "Schedule poll – current %02d:%02d target %02d:%02d",
+                  t.hour, t.minute, id(schedule_hour), id(schedule_minute));
+                // Midnight reset of manual skip
+                if (t.hour == 0 && t.minute == 0) {
+                  if (id(manual_skip)) {
+                    id(manual_skip) = false;
+                    ESP_LOGI("watering", "Manual skip auto-reset at midnight");
+                  }
+                }
+                // Fire schedule if time matches and not already run today
+                if (t.hour == id(schedule_hour) &&
+                    t.minute == id(schedule_minute) &&
+                    id(last_run_day) != t.day_of_year) {
+                  id(last_run_day) = t.day_of_year;
+                  id(run_full_schedule).execute();
+                }
+                // Calculate seconds until next 5-minute boundary +10s
+                int secs_to_next = (5 - (t.minute % 5)) * 60 - t.second + 10;
+                if (secs_to_next <= 10) secs_to_next += 300;
+                ESP_LOGI("watering", "Next poll in %d seconds", secs_to_next);
+                id(align_delay_secs) = secs_to_next;
+            - delay: !lambda "return (uint32_t)(id(align_delay_secs) * 1000);"
+ 
+  # ── Transformer relay follows active_channels count
+  - id: update_transformer
+    then:
+      - if:
+          condition:
+            lambda: "return id(active_channels) > 0;"
+          then:
+            - switch.turn_on: relay_ch8_transformer
+          else:
+            - switch.turn_off: relay_ch8_transformer
+ 
+  # ── Evaluate all skip conditions, result stored in skip_result
+  - id: check_skip_conditions
+    then:
+      - lambda: |-
+          bool skip = false;
+          if (!id(master_enabled)) {
+            ESP_LOGI("watering", "Skip: master disabled");
+            skip = true;
+          }
+          if (id(manual_skip)) {
+            ESP_LOGI("watering", "Skip: manual skip active");
+            skip = true;
+          }
+          if (!id(weather_ok)) {
+            ESP_LOGI("watering", "Skip: weather not OK");
+            skip = true;
+          }
+          id(skip_result) = skip;
+ 
+  # ── Full sequential watering run
+  - id: run_full_schedule
+    mode: single
+    then:
+      - script.execute: check_skip_conditions
+      - if:
+          condition:
+            lambda: "return id(skip_result);"
+          then:
+            - logger.log: "Scheduled run SKIPPED"
+            - homeassistant.event:
+                event: esphome.watering_skipped
+                data: {}
+          else:
+            - globals.set:
+                id: schedule_running
+                value: "true"
+            - logger.log: "Watering schedule START"
+            - homeassistant.event:
+                event: esphome.watering_started
+                data:
+                  trigger: schedule
+ 
+            - switch.turn_on: relay_ch1
+            - delay: !lambda "return (uint32_t)(id(duration_z1) * 60000);"
+            - switch.turn_off: relay_ch1
+ 
+            - switch.turn_on: relay_ch2
+            - delay: !lambda "return (uint32_t)(id(duration_z2) * 60000);"
+            - switch.turn_off: relay_ch2
+ 
+            - switch.turn_on: relay_ch3
+            - delay: !lambda "return (uint32_t)(id(duration_z3) * 60000);"
+            - switch.turn_off: relay_ch3
+ 
+            - switch.turn_on: relay_ch4
+            - delay: !lambda "return (uint32_t)(id(duration_z4) * 60000);"
+            - switch.turn_off: relay_ch4
+ 
+            - switch.turn_on: relay_ch5
+            - delay: !lambda "return (uint32_t)(id(duration_z5) * 60000);"
+            - switch.turn_off: relay_ch5
+ 
+            - globals.set:
+                id: schedule_running
+                value: "false"
+            - globals.set:
+                id: last_watered_epoch
+                value: !lambda "return (int)id(local_time).now().timestamp;"
+            - logger.log: "Watering schedule COMPLETE"
+            - homeassistant.event:
+                event: esphome.watering_complete
+                data:
+                  trigger: schedule
+ 
+  # ── Hard stop – all zones off immediately
+  - id: emergency_stop
+    then:
+      - switch.turn_off: relay_ch1
+      - switch.turn_off: relay_ch2
+      - switch.turn_off: relay_ch3
+      - switch.turn_off: relay_ch4
+      - switch.turn_off: relay_ch5
+      - globals.set:
+          id: active_channels
+          value: "0"
+      - script.execute: update_transformer
+      - globals.set:
+          id: schedule_running
+          value: "false"
+      - logger.log: "EMERGENCY STOP – all zones off"
+      - homeassistant.event:
+          event: esphome.watering_emergency_stop
+          data: {}
+ 
+  # ── Log restored state on boot
+  - id: restore_schedule_state
+    then:
+      - logger.log:
+          format: "Boot – schedule %02d:%02d master:%d weather_ok:%d manual_skip:%d"
+          args:
+            - "id(schedule_hour)"
+            - "id(schedule_minute)"
+            - "id(master_enabled)"
+            - "id(weather_ok)"
+            - "id(manual_skip)"
+ 
+# ─────────────────────────────────────────────────────────────────
+# SWITCHES
+# Pin mapping (active-HIGH relay board):
+#   CH1 → G32  Zone 1
+#   CH2 → G33  Zone 2
+#   CH3 → G25  Zone 3
+#   CH4 → G26  Zone 4
+#   CH5 → G27  Zone 5
+#   CH6 → G14  (unused)
+#   CH7 → G12  (unused)
+#   CH8 → G13  Transformer
+# ─────────────────────────────────────────────────────────────────
+switch:
+  # CH8 – Transformer (internal, controlled automatically)
+  - platform: gpio
+    id: relay_ch8_transformer
+    name: "Transformer Power"
+    pin:
+      number: GPIO13
+      inverted: false
+    internal: true
+    restore_mode: ALWAYS_OFF
+ 
+  # CH1 – Zone 1
+  - platform: gpio
+    id: relay_ch1
+    name: "Zone 1"
+    icon: mdi:water
+    pin:
+      number: GPIO32
+      inverted: false
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      then:
+        - lambda: "id(active_channels)++;"
+        - script.execute: update_transformer
+    on_turn_off:
+      then:
+        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
+        - script.execute: update_transformer
+ 
+  # CH2 – Zone 2
+  - platform: gpio
+    id: relay_ch2
+    name: "Zone 2"
+    icon: mdi:water
+    pin:
+      number: GPIO33
+      inverted: false
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      then:
+        - lambda: "id(active_channels)++;"
+        - script.execute: update_transformer
+    on_turn_off:
+      then:
+        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
+        - script.execute: update_transformer
+ 
+  # CH3 – Zone 3
+  - platform: gpio
+    id: relay_ch3
+    name: "Zone 3"
+    icon: mdi:water
+    pin:
+      number: GPIO25
+      inverted: false
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      then:
+        - lambda: "id(active_channels)++;"
+        - script.execute: update_transformer
+    on_turn_off:
+      then:
+        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
+        - script.execute: update_transformer
+ 
+  # CH4 – Zone 4
+  - platform: gpio
+    id: relay_ch4
+    name: "Zone 4"
+    icon: mdi:water
+    pin:
+      number: GPIO26
+      inverted: false
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      then:
+        - lambda: "id(active_channels)++;"
+        - script.execute: update_transformer
+    on_turn_off:
+      then:
+        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
+        - script.execute: update_transformer
+ 
+  # CH5 – Zone 5
+  - platform: gpio
+    id: relay_ch5
+    name: "Zone 5"
+    icon: mdi:water
+    pin:
+      number: GPIO27
+      inverted: false
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      then:
+        - lambda: "id(active_channels)++;"
+        - script.execute: update_transformer
+    on_turn_off:
+      then:
+        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
+        - script.execute: update_transformer
+ 
+  # ── Virtual control switches (flash-backed, visible in HA)
+  - platform: template
+    name: "Master Enable"
+    id: sw_master_enabled
+    icon: mdi:power
+    restore_mode: RESTORE_DEFAULT_ON
+    lambda: "return id(master_enabled);"
+    turn_on_action:
+      globals.set:
+        id: master_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: master_enabled
+        value: "false"
+ 
+  - platform: template
+    name: "Manual Skip Today"
+    id: sw_manual_skip
+    icon: mdi:skip-next
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: "return id(manual_skip);"
+    turn_on_action:
+      globals.set:
+        id: manual_skip
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: manual_skip
+        value: "false"
+ 
+  - platform: template
+    name: "Weather OK"
+    id: sw_weather_ok
+    icon: mdi:weather-sunny
+    restore_mode: RESTORE_DEFAULT_ON
+    lambda: "return id(weather_ok);"
+    turn_on_action:
+      globals.set:
+        id: weather_ok
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: weather_ok
+        value: "false"
+ 
+# ─────────────────────────────────────────────────────────────────
+# BUTTONS
+# ─────────────────────────────────────────────────────────────────
+button:
+  - platform: template
+    name: "Run Full Schedule Now"
+    icon: mdi:play-circle
+    on_press:
+      script.execute: run_full_schedule
+ 
+  - platform: template
+    name: "Emergency Stop"
+    icon: mdi:stop-circle
+    on_press:
+      script.execute: emergency_stop
+ 
+# ─────────────────────────────────────────────────────────────────
+# NUMBERS – editable from HA, stored in globals
+# ─────────────────────────────────────────────────────────────────
+number:
+  - platform: template
+    name: "Schedule Hour"
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    unit_of_measurement: h
+    lambda: "return id(schedule_hour);"
+    set_action:
+      globals.set:
+        id: schedule_hour
+        value: !lambda "return (int)x;"
+ 
+  - platform: template
+    name: "Schedule Minute"
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 55
+    step: 5
+    mode: box
+    unit_of_measurement: min
+    lambda: "return id(schedule_minute);"
+    set_action:
+      globals.set:
+        id: schedule_minute
+        value: !lambda "return (int)x;"
+ 
+  - platform: template
+    name: "Zone 1 Duration (min)"
+    icon: mdi:timer
+    min_value: 1
+    max_value: 60
+    step: 1
+    unit_of_measurement: min
+    mode: box
+    lambda: "return id(duration_z1);"
+    set_action:
+      globals.set:
+        id: duration_z1
+        value: !lambda "return (int)x;"
+ 
+  - platform: template
+    name: "Zone 2 Duration (min)"
+    icon: mdi:timer
+    min_value: 1
+    max_value: 60
+    step: 1
+    unit_of_measurement: min
+    mode: box
+    lambda: "return id(duration_z2);"
+    set_action:
+      globals.set:
+        id: duration_z2
+        value: !lambda "return (int)x;"
+ 
+  - platform: template
+    name: "Zone 3 Duration (min)"
+    icon: mdi:timer
+    min_value: 1
+    max_value: 60
+    step: 1
+    unit_of_measurement: min
+    mode: box
+    lambda: "return id(duration_z3);"
+    set_action:
+      globals.set:
+        id: duration_z3
+        value: !lambda "return (int)x;"
+ 
+  - platform: template
+    name: "Zone 4 Duration (min)"
+    icon: mdi:timer
+    min_value: 1
+    max_value: 60
+    step: 1
+    unit_of_measurement: min
+    mode: box
+    lambda: "return id(duration_z4);"
+    set_action:
+      globals.set:
+        id: duration_z4
+        value: !lambda "return (int)x;"
+ 
+  - platform: template
+    name: "Zone 5 Duration (min)"
+    icon: mdi:timer
+    min_value: 1
+    max_value: 60
+    step: 1
+    unit_of_measurement: min
+    mode: box
+    lambda: "return id(duration_z5);"
+    set_action:
+      globals.set:
+        id: duration_z5
+        value: !lambda "return (int)x;"
+ 
+  - platform: template
+    name: "Moisture Skip Threshold (%)"
+    icon: mdi:water-percent
+    min_value: 10
+    max_value: 90
+    step: 5
+    unit_of_measurement: "%"
+    mode: slider
+    lambda: "return id(moisture_skip_threshold);"
+    set_action:
+      globals.set:
+        id: moisture_skip_threshold
+        value: !lambda "return x;"
+ 
+  - platform: template
+    name: "Moisture Top-up Threshold (%)"
+    icon: mdi:water-alert
+    min_value: 5
+    max_value: 50
+    step: 5
+    unit_of_measurement: "%"
+    mode: slider
+    lambda: "return id(moisture_topup_threshold);"
+    set_action:
+      globals.set:
+        id: moisture_topup_threshold
+        value: !lambda "return x;"
+ 
+# ─────────────────────────────────────────────────────────────────
+# SENSORS – diagnostics
+# ─────────────────────────────────────────────────────────────────
+sensor:
+  - platform: uptime
+    name: "Uptime"
+    icon: mdi:clock-outline
+    update_interval: 60s
+ 
+  - platform: internal_temperature
+    name: "ESP32 Temperature"
+    icon: mdi:thermometer
+    update_interval: 60s
+ 
+# ─────────────────────────────────────────────────────────────────
+# BINARY SENSORS – diagnostics
+# ─────────────────────────────────────────────────────────────────
+binary_sensor:
+  - platform: template
+    name: "Transformer Active"
+    device_class: power
+    lambda: "return id(active_channels) > 0;"
+ 
+  - platform: template
+    name: "Schedule Running"
+    device_class: running
+    lambda: "return id(schedule_running);"
+ 
+  - platform: template
+    name: "Watering Blocked"
+    device_class: problem
+    lambda: |-
+      return !id(master_enabled)
+          || id(manual_skip)
+          || !id(weather_ok);
+ 
+# ─────────────────────────────────────────────────────────────────
+# TEXT SENSORS – diagnostics
+# ─────────────────────────────────────────────────────────────────
+text_sensor:
+  - platform: template
+    name: "Schedule Time"
+    icon: mdi:clock-outline
+    update_interval: 60s
+    lambda: |-
+      char buf[6];
+      snprintf(buf, sizeof(buf), "%02d:%02d", id(schedule_hour), id(schedule_minute));
+      return {buf};
+ 
+  - platform: template
+    name: "Active Zones"
+    icon: mdi:water-pump
+    update_interval: 5s
+    lambda: |-
+      if (id(active_channels) == 0) return {"None"};
+      return {to_string(id(active_channels)) + " zone(s) running"};
+ 
+  - platform: template
+    name: "Skip Reason"
+    icon: mdi:information
+    update_interval: 30s
+    lambda: |-
+      std::string r = "";
+      if (!id(master_enabled)) r += "Master off; ";
+      if (id(manual_skip))     r += "Manual skip; ";
+      if (!id(weather_ok))     r += "Weather blocked; ";
+      return {r.empty() ? "Clear – will water" : r};
+ 
+  - platform: template
+    name: "Last Watered"
+    icon: mdi:history
+    update_interval: 60s
+    lambda: |-
+      if (id(last_watered_epoch) == 0) return {"Never"};
+      int hours = (id(local_time).now().timestamp - id(last_watered_epoch)) / 3600;
+      if (hours < 1) return {"< 1 hour ago"};
+      return {to_string(hours) + "h ago"};
