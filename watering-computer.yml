@@ -74,16 +74,67 @@ time:
 # ─────────────────────────────────────────────────────────────────
 globals:
   # ── Persistent – survive reboot and power loss
-  - id: schedule_hour
+  # Schedule slots – up to 4 daily runs, each gated by its own enable flag
+  - id: slot1_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "true"
+
+  - id: slot1_hour
     type: int
     restore_value: yes
     initial_value: "6"
- 
-  - id: schedule_minute
+
+  - id: slot1_minute
     type: int
     restore_value: yes
     initial_value: "0"
- 
+
+  - id: slot2_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  - id: slot2_hour
+    type: int
+    restore_value: yes
+    initial_value: "18"
+
+  - id: slot2_minute
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: slot3_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  - id: slot3_hour
+    type: int
+    restore_value: yes
+    initial_value: "7"
+
+  - id: slot3_minute
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: slot4_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  - id: slot4_hour
+    type: int
+    restore_value: yes
+    initial_value: "19"
+
+  - id: slot4_minute
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
   - id: weather_ok
     type: bool
     restore_value: yes
@@ -155,11 +206,26 @@ globals:
     restore_value: no
     initial_value: "false"
  
-  - id: last_run_day
+  - id: last_run_day_1
     type: int
     restore_value: no
     initial_value: "-1"
- 
+
+  - id: last_run_day_2
+    type: int
+    restore_value: no
+    initial_value: "-1"
+
+  - id: last_run_day_3
+    type: int
+    restore_value: no
+    initial_value: "-1"
+
+  - id: last_run_day_4
+    type: int
+    restore_value: no
+    initial_value: "-1"
+
   - id: align_delay_secs
     type: int
     restore_value: no
@@ -180,8 +246,7 @@ script:
           then:
             - lambda: |-
                 auto t = id(local_time).now();
-                ESP_LOGI("watering", "Schedule poll – current %02d:%02d target %02d:%02d",
-                  t.hour, t.minute, id(schedule_hour), id(schedule_minute));
+                ESP_LOGI("watering", "Schedule poll – current %02d:%02d", t.hour, t.minute);
                 // Midnight reset of manual skip
                 if (t.hour == 0 && t.minute == 0) {
                   if (id(manual_skip)) {
@@ -189,12 +254,21 @@ script:
                     ESP_LOGI("watering", "Manual skip auto-reset at midnight");
                   }
                 }
-                // Fire schedule if time matches and not already run today
-                if (t.hour == id(schedule_hour) &&
-                    t.minute == id(schedule_minute) &&
-                    id(last_run_day) != t.day_of_year) {
-                  id(last_run_day) = t.day_of_year;
-                  id(run_full_schedule).execute();
+                // Fire if any enabled slot matches and hasn't already run today
+                struct Slot { bool en; int hr; int mn; int *last; int idx; };
+                Slot slots[] = {
+                  {id(slot1_enabled), id(slot1_hour), id(slot1_minute), &id(last_run_day_1), 1},
+                  {id(slot2_enabled), id(slot2_hour), id(slot2_minute), &id(last_run_day_2), 2},
+                  {id(slot3_enabled), id(slot3_hour), id(slot3_minute), &id(last_run_day_3), 3},
+                  {id(slot4_enabled), id(slot4_hour), id(slot4_minute), &id(last_run_day_4), 4},
+                };
+                for (auto &s : slots) {
+                  if (s.en && t.hour == s.hr && t.minute == s.mn && *s.last != t.day_of_year) {
+                    *s.last = t.day_of_year;
+                    ESP_LOGI("watering", "Slot %d firing (%02d:%02d)", s.idx, s.hr, s.mn);
+                    id(run_full_schedule).execute();
+                    break;
+                  }
                 }
                 // Calculate seconds until next 5-minute boundary +10s
                 int secs_to_next = (5 - (t.minute % 5)) * 60 - t.second + 10;
@@ -342,10 +416,20 @@ script:
   - id: restore_schedule_state
     then:
       - logger.log:
-          format: "Boot – schedule %02d:%02d master:%d weather_ok:%d manual_skip:%d"
+          format: "Boot – slots [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d master:%d weather_ok:%d manual_skip:%d"
           args:
-            - "id(schedule_hour)"
-            - "id(schedule_minute)"
+            - "id(slot1_enabled)"
+            - "id(slot1_hour)"
+            - "id(slot1_minute)"
+            - "id(slot2_enabled)"
+            - "id(slot2_hour)"
+            - "id(slot2_minute)"
+            - "id(slot3_enabled)"
+            - "id(slot3_hour)"
+            - "id(slot3_minute)"
+            - "id(slot4_enabled)"
+            - "id(slot4_hour)"
+            - "id(slot4_minute)"
             - "id(master_enabled)"
             - "id(weather_ok)"
             - "id(manual_skip)"
@@ -508,6 +592,62 @@ switch:
       globals.set:
         id: weather_ok
         value: "false"
+
+  - platform: template
+    name: "Schedule Slot 1 Enabled"
+    icon: mdi:calendar-check
+    restore_mode: RESTORE_DEFAULT_ON
+    lambda: "return id(slot1_enabled);"
+    turn_on_action:
+      globals.set:
+        id: slot1_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: slot1_enabled
+        value: "false"
+
+  - platform: template
+    name: "Schedule Slot 2 Enabled"
+    icon: mdi:calendar-check
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: "return id(slot2_enabled);"
+    turn_on_action:
+      globals.set:
+        id: slot2_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: slot2_enabled
+        value: "false"
+
+  - platform: template
+    name: "Schedule Slot 3 Enabled"
+    icon: mdi:calendar-check
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: "return id(slot3_enabled);"
+    turn_on_action:
+      globals.set:
+        id: slot3_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: slot3_enabled
+        value: "false"
+
+  - platform: template
+    name: "Schedule Slot 4 Enabled"
+    icon: mdi:calendar-check
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: "return id(slot4_enabled);"
+    turn_on_action:
+      globals.set:
+        id: slot4_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: slot4_enabled
+        value: "false"
  
 # ─────────────────────────────────────────────────────────────────
 # BUTTONS
@@ -530,33 +670,118 @@ button:
 # ─────────────────────────────────────────────────────────────────
 number:
   - platform: template
-    name: "Schedule Hour"
+    name: "Slot 1 Hour"
     icon: mdi:clock-start
     min_value: 0
     max_value: 23
     step: 1
     mode: box
     unit_of_measurement: h
-    lambda: "return id(schedule_hour);"
+    lambda: "return id(slot1_hour);"
     set_action:
       globals.set:
-        id: schedule_hour
+        id: slot1_hour
         value: !lambda "return (int)x;"
- 
+
   - platform: template
-    name: "Schedule Minute"
+    name: "Slot 1 Minute"
     icon: mdi:clock-start
     min_value: 0
     max_value: 55
     step: 5
     mode: box
     unit_of_measurement: min
-    lambda: "return id(schedule_minute);"
+    lambda: "return id(slot1_minute);"
     set_action:
       globals.set:
-        id: schedule_minute
+        id: slot1_minute
         value: !lambda "return (int)x;"
- 
+
+  - platform: template
+    name: "Slot 2 Hour"
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    unit_of_measurement: h
+    lambda: "return id(slot2_hour);"
+    set_action:
+      globals.set:
+        id: slot2_hour
+        value: !lambda "return (int)x;"
+
+  - platform: template
+    name: "Slot 2 Minute"
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 55
+    step: 5
+    mode: box
+    unit_of_measurement: min
+    lambda: "return id(slot2_minute);"
+    set_action:
+      globals.set:
+        id: slot2_minute
+        value: !lambda "return (int)x;"
+
+  - platform: template
+    name: "Slot 3 Hour"
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    unit_of_measurement: h
+    lambda: "return id(slot3_hour);"
+    set_action:
+      globals.set:
+        id: slot3_hour
+        value: !lambda "return (int)x;"
+
+  - platform: template
+    name: "Slot 3 Minute"
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 55
+    step: 5
+    mode: box
+    unit_of_measurement: min
+    lambda: "return id(slot3_minute);"
+    set_action:
+      globals.set:
+        id: slot3_minute
+        value: !lambda "return (int)x;"
+
+  - platform: template
+    name: "Slot 4 Hour"
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    unit_of_measurement: h
+    lambda: "return id(slot4_hour);"
+    set_action:
+      globals.set:
+        id: slot4_hour
+        value: !lambda "return (int)x;"
+
+  - platform: template
+    name: "Slot 4 Minute"
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 55
+    step: 5
+    mode: box
+    unit_of_measurement: min
+    lambda: "return id(slot4_minute);"
+    set_action:
+      globals.set:
+        id: slot4_minute
+        value: !lambda "return (int)x;"
+
+
   - platform: template
     name: "Zone 1 Duration (min)"
     icon: mdi:timer
@@ -700,9 +925,22 @@ text_sensor:
     icon: mdi:clock-outline
     update_interval: 60s
     lambda: |-
-      char buf[6];
-      snprintf(buf, sizeof(buf), "%02d:%02d", id(schedule_hour), id(schedule_minute));
-      return {buf};
+      struct Slot { bool en; int hr; int mn; };
+      Slot slots[] = {
+        {id(slot1_enabled), id(slot1_hour), id(slot1_minute)},
+        {id(slot2_enabled), id(slot2_hour), id(slot2_minute)},
+        {id(slot3_enabled), id(slot3_hour), id(slot3_minute)},
+        {id(slot4_enabled), id(slot4_hour), id(slot4_minute)},
+      };
+      std::string out;
+      char buf[8];
+      for (auto &s : slots) {
+        if (!s.en) continue;
+        snprintf(buf, sizeof(buf), "%02d:%02d", s.hr, s.mn);
+        if (!out.empty()) out += ", ";
+        out += buf;
+      }
+      return {out.empty() ? "None" : out};
  
   - platform: template
     name: "Active Zones"
