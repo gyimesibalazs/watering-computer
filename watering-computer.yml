@@ -66,6 +66,12 @@ web_server:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # Multi-AP (2× DIR-2150, wired backhaul). The classic ESP32 does not roam
+  # on its own — the APs steer it via cell-shaping + 802.11k/v frames.
+  power_save_mode: NONE        # don't miss BSS Transition / probe responses
+  fast_connect: false          # rescan every connect so we land on the best AP
+  enable_rrm: true             # 802.11k neighbor reports (esp-idf only)
+  enable_btm: true             # 802.11v BSS Transition Management (esp-idf only)
   ap:
     ssid: "Öntözőkomputer Tartalék"
     password: !secret wifi_password
