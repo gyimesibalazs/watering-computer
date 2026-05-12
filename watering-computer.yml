@@ -1,6 +1,6 @@
 esphome:
   name: "watering-computer"
-  friendly_name: Watering-Computer
+  friendly_name: Öntözőkomputer
   min_version: 2025.11.0
   name_add_mac_suffix: false
   on_boot:
@@ -30,6 +30,7 @@ esp32:
 logger:
 
 api:
+  reboot_timeout: 0s
   services:
     - service: set_weather_ok
       variables:
@@ -45,15 +46,32 @@ api:
 ota:
   - platform: esphome
 
+web_server:
+  port: 80
+  version: 3
+  sorting_groups:
+    - id: g_zones
+      name: "Zónák"
+      sorting_weight: 10
+    - id: g_sched
+      name: "Időzítés"
+      sorting_weight: 20
+    - id: g_program
+      name: "Program"
+      sorting_weight: 30
+    - id: g_diag
+      name: "Diagnosztika"
+      sorting_weight: 60
+
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-    ssid: "Watering-Computer Fallback"
+    ssid: "Öntözőkomputer Tartalék"
     password: !secret wifi_password
 
 captive_portal:
- 
+
 # ─────────────────────────────────────────────────────────────────
 # TIME – HA is primary (fast, reliable on esp-idf), SNTP is fallback
 # ─────────────────────────────────────────────────────────────────
@@ -66,15 +84,12 @@ time:
     servers:
       - 0.pool.ntp.org
       - 1.pool.ntp.org
- 
+
 # ─────────────────────────────────────────────────────────────────
-# GLOBALS – single block
-# Persistent settings use restore_value: yes (saved to flash)
-# Runtime-only flags use restore_value: no
+# GLOBALS
 # ─────────────────────────────────────────────────────────────────
 globals:
-  # ── Persistent – survive reboot and power loss
-  # Schedule slots – up to 4 daily runs, each gated by its own enable flag
+  # ── Persistent
   - id: slot1_enabled
     type: bool
     restore_value: yes
@@ -139,32 +154,32 @@ globals:
     type: bool
     restore_value: yes
     initial_value: "true"
- 
+
   - id: master_enabled
     type: bool
     restore_value: yes
     initial_value: "true"
- 
+
   - id: manual_skip
     type: bool
     restore_value: yes
     initial_value: "false"
- 
+
   - id: duration_z1
     type: int
     restore_value: yes
     initial_value: "10"
- 
+
   - id: duration_z2
     type: int
     restore_value: yes
     initial_value: "10"
- 
+
   - id: duration_z3
     type: int
     restore_value: yes
     initial_value: "10"
- 
+
   - id: duration_z4
     type: int
     restore_value: yes
@@ -174,18 +189,18 @@ globals:
     type: float
     restore_value: yes
     initial_value: "40.0"
- 
+
   - id: moisture_topup_threshold
     type: float
     restore_value: yes
     initial_value: "20.0"
- 
+
   - id: last_watered_epoch
     type: int
     restore_value: yes
     initial_value: "0"
- 
-  # ── Runtime only – always reset on boot
+
+  # ── Runtime only
   - id: active_channels
     type: int
     restore_value: no
@@ -205,12 +220,12 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
- 
+
   - id: skip_result
     type: bool
     restore_value: no
     initial_value: "false"
- 
+
   - id: last_run_day_1
     type: int
     restore_value: no
@@ -235,12 +250,11 @@ globals:
     type: int
     restore_value: no
     initial_value: "0"
- 
+
 # ─────────────────────────────────────────────────────────────────
 # SCRIPTS
 # ─────────────────────────────────────────────────────────────────
 script:
-  # ── Aligned 5-minute poll – started by on_loop once SNTP valid, repeats forever
   - id: schedule_poll
     mode: single
     then:
@@ -252,14 +266,12 @@ script:
             - lambda: |-
                 auto t = id(local_time).now();
                 ESP_LOGI("watering", "Schedule poll – current %02d:%02d", t.hour, t.minute);
-                // Midnight reset of manual skip
                 if (t.hour == 0 && t.minute == 0) {
                   if (id(manual_skip)) {
                     id(manual_skip) = false;
                     ESP_LOGI("watering", "Manual skip auto-reset at midnight");
                   }
                 }
-                // Fire if any enabled slot matches and hasn't already run today
                 struct Slot { bool en; int hr; int mn; int *last; int idx; };
                 Slot slots[] = {
                   {id(slot1_enabled), id(slot1_hour), id(slot1_minute), &id(last_run_day_1), 1},
@@ -275,14 +287,13 @@ script:
                     break;
                   }
                 }
-                // Calculate seconds until next 5-minute boundary +10s
                 int secs_to_next = (5 - (t.minute % 5)) * 60 - t.second + 10;
                 if (secs_to_next <= 10) secs_to_next += 300;
                 ESP_LOGI("watering", "Next poll in %d seconds", secs_to_next);
                 id(align_delay_secs) = secs_to_next;
             - delay: !lambda "return (uint32_t)(id(align_delay_secs) * 1000);"
- 
-  # ── Transformer relay follows active_channels count
+
+  # ── CH8 transformer follows any active channel
   - id: update_transformer
     then:
       - if:
@@ -304,7 +315,6 @@ script:
           else:
             - switch.turn_off: relay_ch7_pump
 
-  # ── Evaluate all skip conditions, result stored in skip_result
   - id: check_skip_conditions
     then:
       - lambda: |-
@@ -322,8 +332,7 @@ script:
             skip = true;
           }
           id(skip_result) = skip;
- 
-  # ── Full sequential watering run
+
   - id: run_full_schedule
     mode: single
     then:
@@ -345,7 +354,7 @@ script:
                 event: esphome.watering_started
                 data:
                   trigger: schedule
- 
+
             - if:
                 condition:
                   lambda: "return id(duration_z1) > 0;"
@@ -402,7 +411,7 @@ script:
   - id: run_bleed
     mode: single
     then:
-      - logger.log: "Bleed START"
+      - logger.log: "Légtelenítés START"
       - globals.set:
           id: bleed_mode
           value: "true"
@@ -444,12 +453,11 @@ script:
           id: schedule_running
           value: "false"
       - script.execute: update_pump
-      - logger.log: "Bleed COMPLETE"
+      - logger.log: "Légtelenítés COMPLETE"
       - homeassistant.event:
           event: esphome.bleed_complete
           data: {}
 
-  # ── Hard stop – all zones off immediately
   - id: emergency_stop
     then:
       - script.stop: run_full_schedule
@@ -477,8 +485,7 @@ script:
       - homeassistant.event:
           event: esphome.watering_emergency_stop
           data: {}
- 
-  # ── Log restored state on boot
+
   - id: restore_schedule_state
     then:
       - logger.log:
@@ -499,7 +506,7 @@ script:
             - "id(master_enabled)"
             - "id(weather_ok)"
             - "id(manual_skip)"
- 
+
 # ─────────────────────────────────────────────────────────────────
 # SWITCHES
 # Pin mapping (active-HIGH relay board):
@@ -513,10 +520,10 @@ script:
 #   CH8 → G13  Transformer
 # ─────────────────────────────────────────────────────────────────
 switch:
-  # CH8 – Transformer (internal, controlled automatically)
+  # CH8 – Transformer (internal, automatic)
   - platform: gpio
     id: relay_ch8_transformer
-    name: "Transformer Power"
+    name: "Trafó tápellátás"
     pin:
       number: GPIO13
       inverted: false
@@ -526,7 +533,7 @@ switch:
   # CH7 – Pump (internal, automatic)
   - platform: gpio
     id: relay_ch7_pump
-    name: "Pump"
+    name: "Szivattyú"
     pin:
       number: GPIO12
       inverted: false
@@ -536,8 +543,11 @@ switch:
   # CH1 – Zone 1 (traditional)
   - platform: gpio
     id: relay_ch1
-    name: "Zone 1"
+    name: "1. zóna"
     icon: mdi:water
+    web_server:
+      sorting_weight: 10
+      sorting_group_id: g_zones
     pin:
       number: GPIO32
       inverted: false
@@ -558,8 +568,11 @@ switch:
   # CH2 – Zone 2 (traditional)
   - platform: gpio
     id: relay_ch2
-    name: "Zone 2"
+    name: "2. zóna"
     icon: mdi:water
+    web_server:
+      sorting_weight: 20
+      sorting_group_id: g_zones
     pin:
       number: GPIO33
       inverted: false
@@ -580,8 +593,11 @@ switch:
   # CH3 – Zone 3 (traditional)
   - platform: gpio
     id: relay_ch3
-    name: "Zone 3"
+    name: "3. zóna"
     icon: mdi:water
+    web_server:
+      sorting_weight: 30
+      sorting_group_id: g_zones
     pin:
       number: GPIO25
       inverted: false
@@ -602,8 +618,11 @@ switch:
   # CH6 – Zone 4 (no main valve, uses CH8 transformer only)
   - platform: gpio
     id: relay_ch6_zone4
-    name: "Zone 4"
+    name: "4. zóna"
     icon: mdi:water
+    web_server:
+      sorting_weight: 40
+      sorting_group_id: g_zones
     pin:
       number: GPIO14
       inverted: false
@@ -619,9 +638,12 @@ switch:
 
   # ── Virtual control switches – globals are the source of truth (restore_value: yes)
   - platform: template
-    name: "Master Enable"
+    name: "Főkapcsoló"
     id: sw_master_enabled
     icon: mdi:power
+    web_server:
+      sorting_weight: 10
+      sorting_group_id: g_sched
     restore_mode: DISABLED
     lambda: "return id(master_enabled);"
     turn_on_action:
@@ -639,9 +661,12 @@ switch:
             - script.execute: emergency_stop
 
   - platform: template
-    name: "Manual Skip Today"
+    name: "Mai kihagyás"
     id: sw_manual_skip
     icon: mdi:skip-next
+    web_server:
+      sorting_weight: 20
+      sorting_group_id: g_sched
     restore_mode: DISABLED
     lambda: "return id(manual_skip);"
     turn_on_action:
@@ -659,9 +684,12 @@ switch:
           value: "false"
 
   - platform: template
-    name: "Weather OK"
+    name: "Időjárás megfelelő"
     id: sw_weather_ok
     icon: mdi:weather-sunny
+    web_server:
+      sorting_weight: 30
+      sorting_group_id: g_sched
     restore_mode: DISABLED
     lambda: "return id(weather_ok);"
     turn_on_action:
@@ -679,9 +707,12 @@ switch:
             - script.execute: emergency_stop
 
   - platform: template
-    name: "Schedule Slot 1 Enabled"
+    name: "1. ütem engedélyezve"
     icon: mdi:calendar-check
     restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_weight: 40
+      sorting_group_id: g_sched
     lambda: "return id(slot1_enabled);"
     turn_on_action:
       globals.set:
@@ -693,9 +724,12 @@ switch:
         value: "false"
 
   - platform: template
-    name: "Schedule Slot 2 Enabled"
+    name: "2. ütem engedélyezve"
     icon: mdi:calendar-check
     restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_weight: 50
+      sorting_group_id: g_sched
     lambda: "return id(slot2_enabled);"
     turn_on_action:
       globals.set:
@@ -707,9 +741,12 @@ switch:
         value: "false"
 
   - platform: template
-    name: "Schedule Slot 3 Enabled"
+    name: "3. ütem engedélyezve"
     icon: mdi:calendar-check
     restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_weight: 60
+      sorting_group_id: g_sched
     lambda: "return id(slot3_enabled);"
     turn_on_action:
       globals.set:
@@ -721,9 +758,12 @@ switch:
         value: "false"
 
   - platform: template
-    name: "Schedule Slot 4 Enabled"
+    name: "4. ütem engedélyezve"
     icon: mdi:calendar-check
     restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_weight: 70
+      sorting_group_id: g_sched
     lambda: "return id(slot4_enabled);"
     turn_on_action:
       globals.set:
@@ -733,38 +773,50 @@ switch:
       globals.set:
         id: slot4_enabled
         value: "false"
- 
+
 # ─────────────────────────────────────────────────────────────────
 # BUTTONS
 # ─────────────────────────────────────────────────────────────────
 button:
   - platform: template
-    name: "Run Full Schedule Now"
+    name: "Teljes program indítása most"
     icon: mdi:play-circle
+    web_server:
+      sorting_weight: 5
+      sorting_group_id: g_program
     on_press:
       script.execute: run_full_schedule
 
   - platform: template
-    name: "Run Bleed"
+    name: "Légtelenítés indítása"
     icon: mdi:air-purifier
+    web_server:
+      sorting_weight: 10
+      sorting_group_id: g_program
     on_press:
       script.execute: run_bleed
 
   - platform: template
-    name: "Emergency Stop"
+    name: "Vészleállítás"
     icon: mdi:stop-circle
+    web_server:
+      sorting_weight: 5
+      sorting_group_id: g_zones
     on_press:
       script.execute: emergency_stop
- 
+
 # ─────────────────────────────────────────────────────────────────
 # DATETIME – schedule slot times (time-only, floored to 5 min)
 # ─────────────────────────────────────────────────────────────────
 datetime:
   - platform: template
-    name: "Slot 1 Time"
+    name: "1. ütem időpont"
     id: slot1_time
     type: time
     icon: mdi:clock-start
+    web_server:
+      sorting_weight: 45
+      sorting_group_id: g_sched
     update_interval: 60s
     lambda: |-
       ESPTime t{};
@@ -778,10 +830,13 @@ datetime:
           id(slot1_minute) = (x.minute / 5) * 5;
 
   - platform: template
-    name: "Slot 2 Time"
+    name: "2. ütem időpont"
     id: slot2_time
     type: time
     icon: mdi:clock-start
+    web_server:
+      sorting_weight: 55
+      sorting_group_id: g_sched
     update_interval: 60s
     lambda: |-
       ESPTime t{};
@@ -795,10 +850,13 @@ datetime:
           id(slot2_minute) = (x.minute / 5) * 5;
 
   - platform: template
-    name: "Slot 3 Time"
+    name: "3. ütem időpont"
     id: slot3_time
     type: time
     icon: mdi:clock-start
+    web_server:
+      sorting_weight: 65
+      sorting_group_id: g_sched
     update_interval: 60s
     lambda: |-
       ESPTime t{};
@@ -812,10 +870,13 @@ datetime:
           id(slot3_minute) = (x.minute / 5) * 5;
 
   - platform: template
-    name: "Slot 4 Time"
+    name: "4. ütem időpont"
     id: slot4_time
     type: time
     icon: mdi:clock-start
+    web_server:
+      sorting_weight: 75
+      sorting_group_id: g_sched
     update_interval: 60s
     lambda: |-
       ESPTime t{};
@@ -829,12 +890,15 @@ datetime:
           id(slot4_minute) = (x.minute / 5) * 5;
 
 # ─────────────────────────────────────────────────────────────────
-# NUMBERS – editable from HA, stored in globals
+# NUMBERS
 # ─────────────────────────────────────────────────────────────────
 number:
   - platform: template
-    name: "Zone 1 Duration (min)"
+    name: "1. zóna időtartama"
     icon: mdi:timer
+    web_server:
+      sorting_weight: 20
+      sorting_group_id: g_program
     min_value: 0
     max_value: 60
     step: 1
@@ -845,10 +909,13 @@ number:
       globals.set:
         id: duration_z1
         value: !lambda "return (int)x;"
- 
+
   - platform: template
-    name: "Zone 2 Duration (min)"
+    name: "2. zóna időtartama"
     icon: mdi:timer
+    web_server:
+      sorting_weight: 21
+      sorting_group_id: g_program
     min_value: 0
     max_value: 60
     step: 1
@@ -859,10 +926,13 @@ number:
       globals.set:
         id: duration_z2
         value: !lambda "return (int)x;"
- 
+
   - platform: template
-    name: "Zone 3 Duration (min)"
+    name: "3. zóna időtartama"
     icon: mdi:timer
+    web_server:
+      sorting_weight: 22
+      sorting_group_id: g_program
     min_value: 0
     max_value: 60
     step: 1
@@ -873,10 +943,13 @@ number:
       globals.set:
         id: duration_z3
         value: !lambda "return (int)x;"
- 
+
   - platform: template
-    name: "Zone 4 Duration (min)"
+    name: "4. zóna időtartama"
     icon: mdi:timer
+    web_server:
+      sorting_weight: 23
+      sorting_group_id: g_program
     min_value: 0
     max_value: 60
     step: 1
@@ -889,8 +962,11 @@ number:
         value: !lambda "return (int)x;"
 
   - platform: template
-    name: "Moisture Skip Threshold (%)"
+    name: "Nedvesség kihagyási küszöb"
     icon: mdi:water-percent
+    web_server:
+      sorting_weight: 80
+      sorting_group_id: g_sched
     min_value: 10
     max_value: 90
     step: 5
@@ -901,10 +977,13 @@ number:
       globals.set:
         id: moisture_skip_threshold
         value: !lambda "return x;"
- 
+
   - platform: template
-    name: "Moisture Top-up Threshold (%)"
+    name: "Nedvesség pótöntözési küszöb"
     icon: mdi:water-alert
+    web_server:
+      sorting_weight: 90
+      sorting_group_id: g_sched
     min_value: 5
     max_value: 50
     step: 5
@@ -915,56 +994,77 @@ number:
       globals.set:
         id: moisture_topup_threshold
         value: !lambda "return x;"
- 
+
 # ─────────────────────────────────────────────────────────────────
-# SENSORS – diagnostics
+# SENSORS
 # ─────────────────────────────────────────────────────────────────
 sensor:
   - platform: uptime
-    name: "Uptime"
+    name: "Működési idő"
     icon: mdi:clock-outline
     update_interval: 60s
- 
+    web_server:
+      sorting_weight: 10
+      sorting_group_id: g_diag
+
   - platform: internal_temperature
-    name: "ESP32 Temperature"
+    name: "ESP32 hőmérséklet"
     icon: mdi:thermometer
     update_interval: 60s
- 
+    web_server:
+      sorting_weight: 20
+      sorting_group_id: g_diag
+
 # ─────────────────────────────────────────────────────────────────
-# BINARY SENSORS – diagnostics
+# BINARY SENSORS
 # ─────────────────────────────────────────────────────────────────
 binary_sensor:
   - platform: template
-    name: "Transformer Active"
+    name: "Trafó aktív"
     device_class: power
+    web_server:
+      sorting_weight: 30
+      sorting_group_id: g_diag
     lambda: "return id(active_channels) > 0;"
- 
+
   - platform: template
-    name: "Schedule Running"
+    name: "Program fut"
     device_class: running
+    web_server:
+      sorting_weight: 40
+      sorting_group_id: g_diag
     lambda: "return id(schedule_running);"
 
   - platform: template
-    name: "Bleed Active"
+    name: "Légtelenítés aktív"
     icon: mdi:air-purifier
+    web_server:
+      sorting_weight: 50
+      sorting_group_id: g_diag
     lambda: "return id(bleed_mode);"
 
   - platform: template
-    name: "Watering Blocked"
+    name: "Öntözés letiltva"
     device_class: problem
+    web_server:
+      sorting_weight: 60
+      sorting_group_id: g_diag
     lambda: |-
       return !id(master_enabled)
           || id(manual_skip)
           || !id(weather_ok);
- 
+
 # ─────────────────────────────────────────────────────────────────
-# TEXT SENSORS – diagnostics
+# TEXT SENSORS
 # ─────────────────────────────────────────────────────────────────
 text_sensor:
   - platform: template
-    name: "Schedule Time"
+    name: "Időzítések"
     icon: mdi:clock-outline
     update_interval: 60s
+    web_server:
+      sorting_weight: 70
+      sorting_group_id: g_diag
     lambda: |-
       struct Slot { bool en; int hr; int mn; };
       Slot slots[] = {
@@ -981,33 +1081,42 @@ text_sensor:
         if (!out.empty()) out += ", ";
         out += buf;
       }
-      return {out.empty() ? "None" : out};
- 
+      return {out.empty() ? "Nincs" : out};
+
   - platform: template
-    name: "Active Zones"
+    name: "Aktív zónák"
     icon: mdi:water-pump
     update_interval: 5s
+    web_server:
+      sorting_weight: 80
+      sorting_group_id: g_diag
     lambda: |-
-      if (id(active_channels) == 0) return {"None"};
-      return {to_string(id(active_channels)) + " zone(s) running"};
- 
+      if (id(active_channels) == 0) return {"Nincs"};
+      return {to_string(id(active_channels)) + " zóna fut"};
+
   - platform: template
-    name: "Skip Reason"
+    name: "Kihagyás oka"
     icon: mdi:information
     update_interval: 30s
+    web_server:
+      sorting_weight: 90
+      sorting_group_id: g_diag
     lambda: |-
       std::string r = "";
-      if (!id(master_enabled)) r += "Master off; ";
-      if (id(manual_skip))     r += "Manual skip; ";
-      if (!id(weather_ok))     r += "Weather blocked; ";
-      return {r.empty() ? "Clear – will water" : r};
- 
+      if (!id(master_enabled)) r += "Főkapcsoló kikapcsolva; ";
+      if (id(manual_skip))     r += "Mai kihagyás; ";
+      if (!id(weather_ok))     r += "Időjárás letiltja; ";
+      return {r.empty() ? "OK – öntözni fog" : r};
+
   - platform: template
-    name: "Last Watered"
+    name: "Utolsó öntözés"
     icon: mdi:history
     update_interval: 60s
+    web_server:
+      sorting_weight: 100
+      sorting_group_id: g_diag
     lambda: |-
-      if (id(last_watered_epoch) == 0) return {"Never"};
+      if (id(last_watered_epoch) == 0) return {"Soha"};
       int hours = (id(local_time).now().timestamp - id(last_watered_epoch)) / 3600;
-      if (hours < 1) return {"< 1 hour ago"};
-      return {to_string(hours) + "h ago"};
+      if (hours < 1) return {"< 1 órája"};
+      return {to_string(hours) + " órája"};
