@@ -666,122 +666,81 @@ button:
       script.execute: emergency_stop
  
 # ─────────────────────────────────────────────────────────────────
+# DATETIME – schedule slot times (time-only, floored to 5 min)
+# ─────────────────────────────────────────────────────────────────
+datetime:
+  - platform: template
+    name: "Slot 1 Time"
+    id: slot1_time
+    type: time
+    icon: mdi:clock-start
+    update_interval: 60s
+    lambda: |-
+      ESPTime t{};
+      t.hour = id(slot1_hour);
+      t.minute = id(slot1_minute);
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          id(slot1_hour) = x.hour;
+          id(slot1_minute) = (x.minute / 5) * 5;
+
+  - platform: template
+    name: "Slot 2 Time"
+    id: slot2_time
+    type: time
+    icon: mdi:clock-start
+    update_interval: 60s
+    lambda: |-
+      ESPTime t{};
+      t.hour = id(slot2_hour);
+      t.minute = id(slot2_minute);
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          id(slot2_hour) = x.hour;
+          id(slot2_minute) = (x.minute / 5) * 5;
+
+  - platform: template
+    name: "Slot 3 Time"
+    id: slot3_time
+    type: time
+    icon: mdi:clock-start
+    update_interval: 60s
+    lambda: |-
+      ESPTime t{};
+      t.hour = id(slot3_hour);
+      t.minute = id(slot3_minute);
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          id(slot3_hour) = x.hour;
+          id(slot3_minute) = (x.minute / 5) * 5;
+
+  - platform: template
+    name: "Slot 4 Time"
+    id: slot4_time
+    type: time
+    icon: mdi:clock-start
+    update_interval: 60s
+    lambda: |-
+      ESPTime t{};
+      t.hour = id(slot4_hour);
+      t.minute = id(slot4_minute);
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          id(slot4_hour) = x.hour;
+          id(slot4_minute) = (x.minute / 5) * 5;
+
+# ─────────────────────────────────────────────────────────────────
 # NUMBERS – editable from HA, stored in globals
 # ─────────────────────────────────────────────────────────────────
 number:
-  - platform: template
-    name: "Slot 1 Hour"
-    icon: mdi:clock-start
-    min_value: 0
-    max_value: 23
-    step: 1
-    mode: box
-    unit_of_measurement: h
-    lambda: "return id(slot1_hour);"
-    set_action:
-      globals.set:
-        id: slot1_hour
-        value: !lambda "return (int)x;"
-
-  - platform: template
-    name: "Slot 1 Minute"
-    icon: mdi:clock-start
-    min_value: 0
-    max_value: 55
-    step: 5
-    mode: box
-    unit_of_measurement: min
-    lambda: "return id(slot1_minute);"
-    set_action:
-      globals.set:
-        id: slot1_minute
-        value: !lambda "return (int)x;"
-
-  - platform: template
-    name: "Slot 2 Hour"
-    icon: mdi:clock-start
-    min_value: 0
-    max_value: 23
-    step: 1
-    mode: box
-    unit_of_measurement: h
-    lambda: "return id(slot2_hour);"
-    set_action:
-      globals.set:
-        id: slot2_hour
-        value: !lambda "return (int)x;"
-
-  - platform: template
-    name: "Slot 2 Minute"
-    icon: mdi:clock-start
-    min_value: 0
-    max_value: 55
-    step: 5
-    mode: box
-    unit_of_measurement: min
-    lambda: "return id(slot2_minute);"
-    set_action:
-      globals.set:
-        id: slot2_minute
-        value: !lambda "return (int)x;"
-
-  - platform: template
-    name: "Slot 3 Hour"
-    icon: mdi:clock-start
-    min_value: 0
-    max_value: 23
-    step: 1
-    mode: box
-    unit_of_measurement: h
-    lambda: "return id(slot3_hour);"
-    set_action:
-      globals.set:
-        id: slot3_hour
-        value: !lambda "return (int)x;"
-
-  - platform: template
-    name: "Slot 3 Minute"
-    icon: mdi:clock-start
-    min_value: 0
-    max_value: 55
-    step: 5
-    mode: box
-    unit_of_measurement: min
-    lambda: "return id(slot3_minute);"
-    set_action:
-      globals.set:
-        id: slot3_minute
-        value: !lambda "return (int)x;"
-
-  - platform: template
-    name: "Slot 4 Hour"
-    icon: mdi:clock-start
-    min_value: 0
-    max_value: 23
-    step: 1
-    mode: box
-    unit_of_measurement: h
-    lambda: "return id(slot4_hour);"
-    set_action:
-      globals.set:
-        id: slot4_hour
-        value: !lambda "return (int)x;"
-
-  - platform: template
-    name: "Slot 4 Minute"
-    icon: mdi:clock-start
-    min_value: 0
-    max_value: 55
-    step: 5
-    mode: box
-    unit_of_measurement: min
-    lambda: "return id(slot4_minute);"
-    set_action:
-      globals.set:
-        id: slot4_minute
-        value: !lambda "return (int)x;"
-
-
   - platform: template
     name: "Zone 1 Duration (min)"
     icon: mdi:timer
