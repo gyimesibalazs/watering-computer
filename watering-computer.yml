@@ -395,6 +395,7 @@ script:
   # ── Hard stop – all zones off immediately
   - id: emergency_stop
     then:
+      - script.stop: run_full_schedule
       - switch.turn_off: relay_ch1
       - switch.turn_off: relay_ch2
       - switch.turn_off: relay_ch3
@@ -547,51 +548,66 @@ switch:
         - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
         - script.execute: update_transformer
  
-  # ── Virtual control switches (flash-backed, visible in HA)
+  # ── Virtual control switches – globals are the source of truth (restore_value: yes)
   - platform: template
     name: "Master Enable"
     id: sw_master_enabled
     icon: mdi:power
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: DISABLED
     lambda: "return id(master_enabled);"
     turn_on_action:
-      globals.set:
-        id: master_enabled
-        value: "true"
+      - globals.set:
+          id: master_enabled
+          value: "true"
     turn_off_action:
-      globals.set:
-        id: master_enabled
-        value: "false"
- 
+      - globals.set:
+          id: master_enabled
+          value: "false"
+      - if:
+          condition:
+            lambda: "return id(schedule_running);"
+          then:
+            - script.execute: emergency_stop
+
   - platform: template
     name: "Manual Skip Today"
     id: sw_manual_skip
     icon: mdi:skip-next
-    restore_mode: RESTORE_DEFAULT_OFF
+    restore_mode: DISABLED
     lambda: "return id(manual_skip);"
     turn_on_action:
-      globals.set:
-        id: manual_skip
-        value: "true"
+      - globals.set:
+          id: manual_skip
+          value: "true"
+      - if:
+          condition:
+            lambda: "return id(schedule_running);"
+          then:
+            - script.execute: emergency_stop
     turn_off_action:
-      globals.set:
-        id: manual_skip
-        value: "false"
- 
+      - globals.set:
+          id: manual_skip
+          value: "false"
+
   - platform: template
     name: "Weather OK"
     id: sw_weather_ok
     icon: mdi:weather-sunny
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: DISABLED
     lambda: "return id(weather_ok);"
     turn_on_action:
-      globals.set:
-        id: weather_ok
-        value: "true"
+      - globals.set:
+          id: weather_ok
+          value: "true"
     turn_off_action:
-      globals.set:
-        id: weather_ok
-        value: "false"
+      - globals.set:
+          id: weather_ok
+          value: "false"
+      - if:
+          condition:
+            lambda: "return id(schedule_running);"
+          then:
+            - script.execute: emergency_stop
 
   - platform: template
     name: "Schedule Slot 1 Enabled"
