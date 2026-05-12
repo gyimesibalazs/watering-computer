@@ -169,12 +169,7 @@ globals:
     type: int
     restore_value: yes
     initial_value: "10"
- 
-  - id: duration_z5
-    type: int
-    restore_value: yes
-    initial_value: "10"
- 
+
   - id: moisture_skip_threshold
     type: float
     restore_value: yes
@@ -195,7 +190,17 @@ globals:
     type: int
     restore_value: no
     initial_value: "0"
- 
+
+  - id: active_traditional
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+  - id: bleed_mode
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
   - id: schedule_running
     type: bool
     restore_value: no
@@ -287,7 +292,18 @@ script:
             - switch.turn_on: relay_ch8_transformer
           else:
             - switch.turn_off: relay_ch8_transformer
- 
+
+  # ── CH7 pump: on while a traditional zone runs, but suppressed in bleed mode
+  - id: update_pump
+    then:
+      - if:
+          condition:
+            lambda: "return id(active_traditional) > 0 && !id(bleed_mode);"
+          then:
+            - switch.turn_on: relay_ch7_pump
+          else:
+            - switch.turn_off: relay_ch7_pump
+
   # ── Evaluate all skip conditions, result stored in skip_result
   - id: check_skip_conditions
     then:
@@ -364,22 +380,12 @@ script:
                 condition:
                   lambda: "return id(duration_z4) > 0;"
                 then:
-                  - switch.turn_on: relay_ch4
+                  - switch.turn_on: relay_ch6_zone4
                   - delay: !lambda "return (uint32_t)(id(duration_z4) * 60000);"
-                  - switch.turn_off: relay_ch4
+                  - switch.turn_off: relay_ch6_zone4
                 else:
                   - logger.log: "Zone 4 skipped (duration 0)"
 
-            - if:
-                condition:
-                  lambda: "return id(duration_z5) > 0;"
-                then:
-                  - switch.turn_on: relay_ch5
-                  - delay: !lambda "return (uint32_t)(id(duration_z5) * 60000);"
-                  - switch.turn_off: relay_ch5
-                else:
-                  - logger.log: "Zone 5 skipped (duration 0)"
- 
             - globals.set:
                 id: schedule_running
                 value: "false"
@@ -391,20 +397,79 @@ script:
                 event: esphome.watering_complete
                 data:
                   trigger: schedule
- 
+
+  # ── Bleed (légtelenítés): runs zones 1-3 with CH7 main valve suppressed
+  - id: run_bleed
+    mode: single
+    then:
+      - logger.log: "Bleed START"
+      - globals.set:
+          id: bleed_mode
+          value: "true"
+      - globals.set:
+          id: schedule_running
+          value: "true"
+      - homeassistant.event:
+          event: esphome.bleed_started
+          data: {}
+
+      - if:
+          condition:
+            lambda: "return id(duration_z1) > 0;"
+          then:
+            - switch.turn_on: relay_ch1
+            - delay: !lambda "return (uint32_t)(id(duration_z1) * 60000);"
+            - switch.turn_off: relay_ch1
+
+      - if:
+          condition:
+            lambda: "return id(duration_z2) > 0;"
+          then:
+            - switch.turn_on: relay_ch2
+            - delay: !lambda "return (uint32_t)(id(duration_z2) * 60000);"
+            - switch.turn_off: relay_ch2
+
+      - if:
+          condition:
+            lambda: "return id(duration_z3) > 0;"
+          then:
+            - switch.turn_on: relay_ch3
+            - delay: !lambda "return (uint32_t)(id(duration_z3) * 60000);"
+            - switch.turn_off: relay_ch3
+
+      - globals.set:
+          id: bleed_mode
+          value: "false"
+      - globals.set:
+          id: schedule_running
+          value: "false"
+      - script.execute: update_pump
+      - logger.log: "Bleed COMPLETE"
+      - homeassistant.event:
+          event: esphome.bleed_complete
+          data: {}
+
   # ── Hard stop – all zones off immediately
   - id: emergency_stop
     then:
       - script.stop: run_full_schedule
+      - script.stop: run_bleed
       - switch.turn_off: relay_ch1
       - switch.turn_off: relay_ch2
       - switch.turn_off: relay_ch3
-      - switch.turn_off: relay_ch4
-      - switch.turn_off: relay_ch5
+      - switch.turn_off: relay_ch6_zone4
+      - switch.turn_off: relay_ch7_pump
       - globals.set:
           id: active_channels
           value: "0"
+      - globals.set:
+          id: active_traditional
+          value: "0"
+      - globals.set:
+          id: bleed_mode
+          value: "false"
       - script.execute: update_transformer
+      - script.execute: update_pump
       - globals.set:
           id: schedule_running
           value: "false"
@@ -438,13 +503,13 @@ script:
 # ─────────────────────────────────────────────────────────────────
 # SWITCHES
 # Pin mapping (active-HIGH relay board):
-#   CH1 → G32  Zone 1
-#   CH2 → G33  Zone 2
-#   CH3 → G25  Zone 3
-#   CH4 → G26  Zone 4
-#   CH5 → G27  Zone 5
-#   CH6 → G14  (unused)
-#   CH7 → G12  (unused)
+#   CH1 → G32  Zone 1 (traditional)
+#   CH2 → G33  Zone 2 (traditional)
+#   CH3 → G25  Zone 3 (traditional)
+#   CH4 → G26  (unused)
+#   CH5 → G27  (unused)
+#   CH6 → G14  Zone 4
+#   CH7 → G12  Pump (auto: on with traditional zones, off in bleed mode)
 #   CH8 → G13  Transformer
 # ─────────────────────────────────────────────────────────────────
 switch:
@@ -457,8 +522,18 @@ switch:
       inverted: false
     internal: true
     restore_mode: ALWAYS_OFF
- 
-  # CH1 – Zone 1
+
+  # CH7 – Pump (internal, automatic)
+  - platform: gpio
+    id: relay_ch7_pump
+    name: "Pump"
+    pin:
+      number: GPIO12
+      inverted: false
+    internal: true
+    restore_mode: ALWAYS_OFF
+
+  # CH1 – Zone 1 (traditional)
   - platform: gpio
     id: relay_ch1
     name: "Zone 1"
@@ -469,14 +544,18 @@ switch:
     restore_mode: ALWAYS_OFF
     on_turn_on:
       then:
-        - lambda: "id(active_channels)++;"
+        - lambda: "id(active_channels)++; id(active_traditional)++;"
         - script.execute: update_transformer
+        - script.execute: update_pump
     on_turn_off:
       then:
-        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
+        - lambda: |-
+            if (id(active_channels) > 0) id(active_channels)--;
+            if (id(active_traditional) > 0) id(active_traditional)--;
         - script.execute: update_transformer
- 
-  # CH2 – Zone 2
+        - script.execute: update_pump
+
+  # CH2 – Zone 2 (traditional)
   - platform: gpio
     id: relay_ch2
     name: "Zone 2"
@@ -487,14 +566,18 @@ switch:
     restore_mode: ALWAYS_OFF
     on_turn_on:
       then:
-        - lambda: "id(active_channels)++;"
+        - lambda: "id(active_channels)++; id(active_traditional)++;"
         - script.execute: update_transformer
+        - script.execute: update_pump
     on_turn_off:
       then:
-        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
+        - lambda: |-
+            if (id(active_channels) > 0) id(active_channels)--;
+            if (id(active_traditional) > 0) id(active_traditional)--;
         - script.execute: update_transformer
- 
-  # CH3 – Zone 3
+        - script.execute: update_pump
+
+  # CH3 – Zone 3 (traditional)
   - platform: gpio
     id: relay_ch3
     name: "Zone 3"
@@ -505,20 +588,24 @@ switch:
     restore_mode: ALWAYS_OFF
     on_turn_on:
       then:
-        - lambda: "id(active_channels)++;"
+        - lambda: "id(active_channels)++; id(active_traditional)++;"
         - script.execute: update_transformer
+        - script.execute: update_pump
     on_turn_off:
       then:
-        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
+        - lambda: |-
+            if (id(active_channels) > 0) id(active_channels)--;
+            if (id(active_traditional) > 0) id(active_traditional)--;
         - script.execute: update_transformer
- 
-  # CH4 – Zone 4
+        - script.execute: update_pump
+
+  # CH6 – Zone 4 (no main valve, uses CH8 transformer only)
   - platform: gpio
-    id: relay_ch4
+    id: relay_ch6_zone4
     name: "Zone 4"
     icon: mdi:water
     pin:
-      number: GPIO26
+      number: GPIO14
       inverted: false
     restore_mode: ALWAYS_OFF
     on_turn_on:
@@ -529,25 +616,7 @@ switch:
       then:
         - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
         - script.execute: update_transformer
- 
-  # CH5 – Zone 5
-  - platform: gpio
-    id: relay_ch5
-    name: "Zone 5"
-    icon: mdi:water
-    pin:
-      number: GPIO27
-      inverted: false
-    restore_mode: ALWAYS_OFF
-    on_turn_on:
-      then:
-        - lambda: "id(active_channels)++;"
-        - script.execute: update_transformer
-    on_turn_off:
-      then:
-        - lambda: "if (id(active_channels) > 0) id(active_channels)--;"
-        - script.execute: update_transformer
- 
+
   # ── Virtual control switches – globals are the source of truth (restore_value: yes)
   - platform: template
     name: "Master Enable"
@@ -674,7 +743,13 @@ button:
     icon: mdi:play-circle
     on_press:
       script.execute: run_full_schedule
- 
+
+  - platform: template
+    name: "Run Bleed"
+    icon: mdi:air-purifier
+    on_press:
+      script.execute: run_bleed
+
   - platform: template
     name: "Emergency Stop"
     icon: mdi:stop-circle
@@ -812,21 +887,7 @@ number:
       globals.set:
         id: duration_z4
         value: !lambda "return (int)x;"
- 
-  - platform: template
-    name: "Zone 5 Duration (min)"
-    icon: mdi:timer
-    min_value: 0
-    max_value: 60
-    step: 1
-    unit_of_measurement: min
-    mode: box
-    lambda: "return id(duration_z5);"
-    set_action:
-      globals.set:
-        id: duration_z5
-        value: !lambda "return (int)x;"
- 
+
   - platform: template
     name: "Moisture Skip Threshold (%)"
     icon: mdi:water-percent
@@ -882,7 +943,12 @@ binary_sensor:
     name: "Schedule Running"
     device_class: running
     lambda: "return id(schedule_running);"
- 
+
+  - platform: template
+    name: "Bleed Active"
+    icon: mdi:air-purifier
+    lambda: "return id(bleed_mode);"
+
   - platform: template
     name: "Watering Blocked"
     device_class: problem
