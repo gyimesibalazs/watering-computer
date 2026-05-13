@@ -74,7 +74,7 @@ time:
 # ─────────────────────────────────────────────────────────────────
 globals:
   # ── Persistent – survive reboot and power loss
-  # Schedule slots – up to 4 daily runs, each gated by its own enable flag
+  # Schedule slots – up to 8 daily runs, each gated by its own enable flag
   - id: slot1_enabled
     type: bool
     restore_value: yes
@@ -131,6 +131,66 @@ globals:
     initial_value: "19"
 
   - id: slot4_minute
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: slot5_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  - id: slot5_hour
+    type: int
+    restore_value: yes
+    initial_value: "8"
+
+  - id: slot5_minute
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: slot6_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  - id: slot6_hour
+    type: int
+    restore_value: yes
+    initial_value: "20"
+
+  - id: slot6_minute
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: slot7_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  - id: slot7_hour
+    type: int
+    restore_value: yes
+    initial_value: "9"
+
+  - id: slot7_minute
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: slot8_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  - id: slot8_hour
+    type: int
+    restore_value: yes
+    initial_value: "21"
+
+  - id: slot8_minute
     type: int
     restore_value: yes
     initial_value: "0"
@@ -226,6 +286,26 @@ globals:
     restore_value: no
     initial_value: "-1"
 
+  - id: last_run_day_5
+    type: int
+    restore_value: no
+    initial_value: "-1"
+
+  - id: last_run_day_6
+    type: int
+    restore_value: no
+    initial_value: "-1"
+
+  - id: last_run_day_7
+    type: int
+    restore_value: no
+    initial_value: "-1"
+
+  - id: last_run_day_8
+    type: int
+    restore_value: no
+    initial_value: "-1"
+
   - id: align_delay_secs
     type: int
     restore_value: no
@@ -261,6 +341,10 @@ script:
                   {id(slot2_enabled), id(slot2_hour), id(slot2_minute), &id(last_run_day_2), 2},
                   {id(slot3_enabled), id(slot3_hour), id(slot3_minute), &id(last_run_day_3), 3},
                   {id(slot4_enabled), id(slot4_hour), id(slot4_minute), &id(last_run_day_4), 4},
+                  {id(slot5_enabled), id(slot5_hour), id(slot5_minute), &id(last_run_day_5), 5},
+                  {id(slot6_enabled), id(slot6_hour), id(slot6_minute), &id(last_run_day_6), 6},
+                  {id(slot7_enabled), id(slot7_hour), id(slot7_minute), &id(last_run_day_7), 7},
+                  {id(slot8_enabled), id(slot8_hour), id(slot8_minute), &id(last_run_day_8), 8},
                 };
                 for (auto &s : slots) {
                   if (s.en && t.hour == s.hr && t.minute == s.mn && *s.last != t.day_of_year) {
@@ -417,7 +501,7 @@ script:
   - id: restore_schedule_state
     then:
       - logger.log:
-          format: "Boot – slots [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d master:%d weather_ok:%d manual_skip:%d"
+          format: "Boot – slots [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d [%d]%02d:%02d master:%d weather_ok:%d manual_skip:%d"
           args:
             - "id(slot1_enabled)"
             - "id(slot1_hour)"
@@ -431,6 +515,18 @@ script:
             - "id(slot4_enabled)"
             - "id(slot4_hour)"
             - "id(slot4_minute)"
+            - "id(slot5_enabled)"
+            - "id(slot5_hour)"
+            - "id(slot5_minute)"
+            - "id(slot6_enabled)"
+            - "id(slot6_hour)"
+            - "id(slot6_minute)"
+            - "id(slot7_enabled)"
+            - "id(slot7_hour)"
+            - "id(slot7_minute)"
+            - "id(slot8_enabled)"
+            - "id(slot8_hour)"
+            - "id(slot8_minute)"
             - "id(master_enabled)"
             - "id(weather_ok)"
             - "id(manual_skip)"
@@ -664,7 +760,63 @@ switch:
       globals.set:
         id: slot4_enabled
         value: "false"
- 
+
+  - platform: template
+    name: "Schedule Slot 5 Enabled"
+    icon: mdi:calendar-check
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: "return id(slot5_enabled);"
+    turn_on_action:
+      globals.set:
+        id: slot5_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: slot5_enabled
+        value: "false"
+
+  - platform: template
+    name: "Schedule Slot 6 Enabled"
+    icon: mdi:calendar-check
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: "return id(slot6_enabled);"
+    turn_on_action:
+      globals.set:
+        id: slot6_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: slot6_enabled
+        value: "false"
+
+  - platform: template
+    name: "Schedule Slot 7 Enabled"
+    icon: mdi:calendar-check
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: "return id(slot7_enabled);"
+    turn_on_action:
+      globals.set:
+        id: slot7_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: slot7_enabled
+        value: "false"
+
+  - platform: template
+    name: "Schedule Slot 8 Enabled"
+    icon: mdi:calendar-check
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: "return id(slot8_enabled);"
+    turn_on_action:
+      globals.set:
+        id: slot8_enabled
+        value: "true"
+    turn_off_action:
+      globals.set:
+        id: slot8_enabled
+        value: "false"
+
 # ─────────────────────────────────────────────────────────────────
 # BUTTONS
 # ─────────────────────────────────────────────────────────────────
@@ -752,6 +904,74 @@ datetime:
       - lambda: |-
           id(slot4_hour) = x.hour;
           id(slot4_minute) = (x.minute / 5) * 5;
+
+  - platform: template
+    name: "Slot 5 Time"
+    id: slot5_time
+    type: time
+    icon: mdi:clock-start
+    update_interval: 60s
+    lambda: |-
+      ESPTime t{};
+      t.hour = id(slot5_hour);
+      t.minute = id(slot5_minute);
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          id(slot5_hour) = x.hour;
+          id(slot5_minute) = (x.minute / 5) * 5;
+
+  - platform: template
+    name: "Slot 6 Time"
+    id: slot6_time
+    type: time
+    icon: mdi:clock-start
+    update_interval: 60s
+    lambda: |-
+      ESPTime t{};
+      t.hour = id(slot6_hour);
+      t.minute = id(slot6_minute);
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          id(slot6_hour) = x.hour;
+          id(slot6_minute) = (x.minute / 5) * 5;
+
+  - platform: template
+    name: "Slot 7 Time"
+    id: slot7_time
+    type: time
+    icon: mdi:clock-start
+    update_interval: 60s
+    lambda: |-
+      ESPTime t{};
+      t.hour = id(slot7_hour);
+      t.minute = id(slot7_minute);
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          id(slot7_hour) = x.hour;
+          id(slot7_minute) = (x.minute / 5) * 5;
+
+  - platform: template
+    name: "Slot 8 Time"
+    id: slot8_time
+    type: time
+    icon: mdi:clock-start
+    update_interval: 60s
+    lambda: |-
+      ESPTime t{};
+      t.hour = id(slot8_hour);
+      t.minute = id(slot8_minute);
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          id(slot8_hour) = x.hour;
+          id(slot8_minute) = (x.minute / 5) * 5;
 
 # ─────────────────────────────────────────────────────────────────
 # NUMBERS – editable from HA, stored in globals
@@ -906,6 +1126,10 @@ text_sensor:
         {id(slot2_enabled), id(slot2_hour), id(slot2_minute)},
         {id(slot3_enabled), id(slot3_hour), id(slot3_minute)},
         {id(slot4_enabled), id(slot4_hour), id(slot4_minute)},
+        {id(slot5_enabled), id(slot5_hour), id(slot5_minute)},
+        {id(slot6_enabled), id(slot6_hour), id(slot6_minute)},
+        {id(slot7_enabled), id(slot7_hour), id(slot7_minute)},
+        {id(slot8_enabled), id(slot8_hour), id(slot8_minute)},
       };
       std::string out;
       char buf[8];

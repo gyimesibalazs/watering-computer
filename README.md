@@ -26,7 +26,7 @@ A daily schedule runs each zone sequentially at a configurable time, with skip c
 
 ## Features
 
-- **Aligned 5-minute scheduler with up to 4 slots.** Polls on the next `:00`, `:05`, `:10`… boundary (+10s grace) once SNTP/HA time is valid. Each of the 4 schedule slots has an enable flag and its own hour/minute; any enabled slot whose time matches fires the full sequence (each slot can fire once per day).
+- **Aligned 5-minute scheduler with up to 8 slots.** Polls on the next `:00`, `:05`, `:10`… boundary (+10s grace) once SNTP/HA time is valid. Each of the 8 schedule slots has an enable flag and its own hour/minute; any enabled slot whose time matches fires the full sequence (each slot can fire once per day).
 - **Sequential zone run.** Each zone runs back-to-back for its configured duration (1–60 min, default 10 min).
 - **Skip conditions:**
   - Master Enable off
@@ -61,8 +61,8 @@ A daily schedule runs each zone sequentially at a configurable time, with skip c
 
 All runtime knobs are exposed as HA entities:
 
-- **Slot 1–4 Hour / Minute** — start times (minute snaps to 5-minute steps)
-- **Schedule Slot 1–4 Enabled** — per-slot toggles; defaults: slot 1 on (06:00), 2–4 off
+- **Slot 1–8 Time** — start times (minute snaps to 5-minute steps)
+- **Schedule Slot 1–8 Enabled** — per-slot toggles; defaults: slot 1 on (06:00), 2–8 off
 - **Zone 1–5 Duration (min)** — set 0 to skip a zone
 - **Moisture Skip / Top-up Threshold (%)** — globals only; not yet wired to sensors
 - **Master Enable**, **Manual Skip Today**, **Weather OK**
