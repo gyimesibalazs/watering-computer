@@ -31,6 +31,8 @@ logger:
 
 api:
   reboot_timeout: 0s
+  encryption:
+    key: !secret api_encryption_key
   services:
     - service: set_weather_ok
       variables:
